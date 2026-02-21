@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>HAISIN EDITOR PRO</title>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-storage.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+<script src="firebase-config.js"></script>
+
+<style>
+body{
+  margin:0;
+  padding:20px;
+  background:#0f1117;
+  color:#fff;
+  font-family:sans-serif;
+}
+
+h1{margin-bottom:10px;}
+
+#previewWrapper{
+  width: 100%;
+  height: 270px;   /* 1080 × 0.25 */
+  overflow:hidden;
+  margin-bottom:12px;
+}
+
+#preview{
+  width:1920px;
+  height:1080px;
+  background:#111;
+  border-radius:10px;
+  margin-bottom:12px;
+  position:relative;
+  overflow:hidden;
+
+  transform:scale(0.25);  /* ← 表示倍率 */
+  transform-origin:top left;
+}
+
+#preview img{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+
+  width:auto;
+  height:auto;
+
+}
+
+button{
+  padding:6px 12px;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  font-size:12px;
+}
+
+.add{background:#3da9ff;color:#000;}
+.export{background:#ffcc00;color:#000;}
+
+#layers{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.layerBox{
+  background:#1b1f2a;
+  border-radius:8px;
+  padding:6px 8px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid rgba(255,255,255,0.05);
+  transition:0.2s;
+  position:relative;
+}
+
+.layerBox.active{
+  border:1px solid #00ff88;
+  box-shadow:0 0 12px #00ff8844;
+}
+
+.layerBox.dragover{
+  outline:2px dashed #3da9ff;
+  background:#1f2433;
+}
+
+.layerBox.dragover::after{
+  content:"ここにドロップ";
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  font-size:12px;
+  color:#3da9ff;
+  pointer-events:none;
+}
+
+.handle{
+  width:18px;
+  height:36px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:3px;
+  cursor:grab;
+  opacity:0.6;
+}
+
+.handle span{
+  height:3px;
+  background:#888;
+  border-radius:2px;
+}
+
+.layerBox img{
+  width:60px;
+  height:40px;
+  object-fit:cover;
+  border-radius:4px;
+  background:#000;
+}
+
+.layerBox input{
+  flex:1;
+  background:#111;
+  border:none;
+  color:#fff;
+  padding:4px 6px;
+  border-radius:4px;
+  font-size:12px;
+}
+
+.toggleBtn{
+  padding:6px 12px;
+  border:none;
+  border-radius:6px;
+  font-size:12px;
+  font-weight:bold;
+  cursor:pointer;
+  min-width:70px;
+}
+
+.toggleBtn.on{background:#00ff88;color:#000;}
+.toggleBtn.off{background:#555;color:#ccc;}
+
+.showBtn{
+  background:#00ff88;
+  color:#000;
+}
+
+.hideBtn{
+  background:#ff3b5c;
+  color:#fff;
+}
+</style>
+</head>
+
+<body>
+
+<h1>HAISIN EDITOR PRO</h1>
+
+<div id="previewWrapper">
+  <div id="preview"></div>
+</div>
+
+<div style="margin-bottom:10px;">
+  <button class="add" onclick="addLayer()">＋ レイヤー追加</button>
+  <button class="showBtn" onclick="sendDisplay()">🟢 表示</button>
+  <button class="hideBtn" onclick="sendHide()">🔴 非表示</button>
+</div>
+
+<div id="layers"></div>
+
+<canvas id="mergeCanvas" width="1920" height="1080" style="display:none;"></canvas>
+
+<script>
+
+firebase.auth().signInAnonymously();
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+let lastHash = "";
+
+let layers=[];
+
+/* 初期4レイヤー */
+for(let i=0;i<4;i++){
+  layers.push({
+    id:Date.now()+i,
+    url:"",
+    visible:true
+  });
+}
+
+/* プレビュー */
+function renderPreview(){
+  const preview=document.getElementById("preview");
+  preview.innerHTML="";
+
+  const total=layers.length;
+
+  layers.forEach((layer,i)=>{
+    if(layer.visible && layer.url){
+      const img=document.createElement("img");
+      img.src=layer.url;
+      img.style.zIndex=total-i;
+      preview.appendChild(img);
+    }
+  });
+}
+
+/* 合成 */
+async function exportMerged(){
+  const canvas=document.getElementById("mergeCanvas");
+  const ctx=canvas.getContext("2d");
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  for(let i=layers.length-1;i>=0;i--){
+    const layer=layers[i];
+    if(!layer.visible || !layer.url) continue;
+
+    const img=await loadImage(layer.url);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  }
+
+  const dataURL=canvas.toDataURL("image/png");
+
+  const win=window.open();
+  win.document.write("<img src='"+dataURL+"' style='width:100%'>");
+}
+
+function generateHash(){
+  return JSON.stringify(
+    layers
+      .filter(l=>l.visible)
+      .map(l=>l.url)
+  );
+}
+
+async function loadImage(url){
+
+  if(url.startsWith("blob:") || url.startsWith("data:")){
+    return new Promise(resolve=>{
+      const img=new Image();
+      img.onload=()=>resolve(img);
+      img.src=url;
+    });
+  }
+
+  // 外部URLの場合
+  const response = await fetch(url);
+  const blob = await response.blob();
+  const objectURL = URL.createObjectURL(blob);
+
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.src=objectURL;
+  });
+}
+
+/* UI */
+function addLayer(){
+  layers.unshift({
+    id:Date.now(),
+    url:"",
+    visible:true
+  });
+  renderUI();
+}
+
+function renderUI(){
+  const container=document.getElementById("layers");
+  container.innerHTML="";
+
+  layers.forEach(layer=>{
+    const displayValue = layer.url && !layer.url.startsWith("blob:")
+        ? layer.url
+        : "";
+
+    const box=document.createElement("div");
+    box.className="layerBox";
+    if(layer.visible) box.classList.add("active");
+
+    box.innerHTML=`
+      <div class="handle">
+        <span></span><span></span><span></span>
+      </div>
+      <button class="toggleBtn ${layer.visible?'on':'off'}">
+        ${layer.visible?'👁 ON':'🚫 OFF'}
+      </button>
+      <img src="${layer.url||''}">
+      <input placeholder="画像URLを入力、またはここに画像をドラッグ＆ドロップ" value="${displayValue}">
+    `;
+
+    const img=box.querySelector("img");
+    const input=box.querySelector("input");
+    const btn=box.querySelector(".toggleBtn");
+
+    /* ON/OFF */
+    btn.onclick=()=>{
+      layer.visible=!layer.visible;
+      renderUI();
+      renderPreview();
+    };
+
+    /* URL入力 */
+    input.oninput=()=>{
+      layer.url=input.value;
+      img.src=layer.url;
+      renderPreview();
+    };
+
+    /* ドラッグ＆ドロップ */
+    box.addEventListener("dragover",e=>{
+      e.preventDefault();
+      box.classList.add("dragover");
+    });
+
+    box.addEventListener("dragleave",()=>{
+      box.classList.remove("dragover");
+    });
+
+    const USE_BASE64 = false;  // Base64に変換するかどうか
+
+    box.addEventListener("drop",e=>{
+      e.preventDefault();
+      box.classList.remove("dragover");
+
+      if(!e.dataTransfer.files.length) return;
+
+      const file=e.dataTransfer.files[0];
+      if(USE_BASE64){
+        const reader=new FileReader();
+        reader.onload=function(ev){
+            layer.url=ev.target.result;
+            renderUI();
+            renderPreview();
+        };
+        reader.readAsDataURL(file);
+
+        }else{
+
+        // Base64使わないモード
+        const blobUrl = URL.createObjectURL(file);
+        layer.url = blobUrl;
+        renderUI();
+        renderPreview();
+
+        }
+    });
+
+    container.appendChild(box);
+  });
+
+  renderPreview();
+}
+
+/* 並び替え */
+Sortable.create(document.getElementById("layers"),{
+  animation:200,
+  handle:".handle",
+  onEnd:function(evt){
+    const moved=layers.splice(evt.oldIndex,1)[0];
+    layers.splice(evt.newIndex,0,moved);
+    renderPreview();
+  }
+});
+
+async function sendDisplay(){
+
+  const newHash = generateHash();
+
+  if(newHash === lastHash){
+    await db.collection("remoteDisplay").doc("state").set({
+      visible:true,
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return;
+  }
+
+  lastHash = newHash;
+
+  const canvas = document.getElementById("mergeCanvas");
+  const ctx = canvas.getContext("2d");
+
+    const targetW = 1920;
+    const targetH = 1080;
+
+    canvas.width = targetW;
+    canvas.height = targetH;
+
+    ctx.clearRect(0,0,targetW,targetH);
+
+    for(let i=layers.length-1;i>=0;i--){
+
+    const layer = layers[i];
+    if(!layer.visible || !layer.url) continue;
+
+    const img = await loadImage(layer.url);
+
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+
+    // 描画サイズは絶対に元サイズ
+    const drawW = imgW;
+    const drawH = imgH;
+
+    // 中央配置
+    const offsetX = (targetW - drawW) / 2;
+    const offsetY = (targetH - drawH) / 2;
+
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+    }
+
+  const blob = await new Promise(resolve =>
+    canvas.toBlob(resolve,"image/png")
+  );
+
+  const ref = storage.ref().child("current.png");
+  await ref.put(blob);
+
+  await db.collection("remoteDisplay").doc("state").set({
+    visible:true,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function sendHide(){
+  await db.collection("remoteDisplay").doc("state").set({
+    visible:false,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+
+
+renderUI();
+
+</script>
+
+</body>
+</html>

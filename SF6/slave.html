@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-storage.js"></script>
+<script src="firebase-config.js"></script>
+
+<style>
+body{
+  margin:0;
+  background:transparent;
+  overflow:hidden;
+}
+
+.layer{
+  position:fixed;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
+  max-width:100%;
+  max-height:100%;
+  opacity:0;
+  transition:opacity 700ms ease;
+  will-change: opacity;
+}
+
+.layer.show{
+  opacity:1;
+}
+</style>
+</head>
+<body>
+
+<script>
+
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+let currentImageUrl = "";
+let currentImgElement = null;
+
+db.collection("remoteDisplay").doc("state")
+.onSnapshot(async doc=>{
+
+  if(!doc.exists) return;
+
+  const data = doc.data();
+
+  if(!data.visible){
+    hideImage();
+    return;
+  }
+
+  // StorageからURL取得
+  const ref = storage.ref().child("current.png");
+  const url = await ref.getDownloadURL();
+
+  const cacheBustedUrl = url + "?t=" + Date.now();
+
+  // 同じ画像なら何もしない
+  if(currentImageUrl === url){
+    return;
+  }
+
+  currentImageUrl = url;
+
+  showNewImage(cacheBustedUrl);
+
+});
+
+function showNewImage(src){
+
+  const newImg = document.createElement("img");
+  newImg.className = "layer"; // 最初は opacity:0
+  newImg.src = src;
+
+  newImg.onload = () => {
+
+    document.body.appendChild(newImg);
+
+    // 強制レイアウト確定
+    newImg.getBoundingClientRect();
+
+    // 次フレームで show 付与
+    requestAnimationFrame(()=>{
+      newImg.classList.add("show");
+    });
+
+    setTimeout(()=>{
+      if(currentImgElement){
+        currentImgElement.remove();
+      }
+      currentImgElement = newImg;
+    },700);
+
+  };
+}
+
+function hideImage(){
+  if(!currentImgElement) return;
+
+  currentImgElement.classList.remove("show");
+
+  setTimeout(()=>{
+    if(currentImgElement){
+      currentImgElement.remove();
+      currentImgElement = null;
+      currentImageUrl = "";
+    }
+  },700);
+}
+
+</script>
+
+</body>
+</html>
